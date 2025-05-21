@@ -62,8 +62,12 @@ pub fn build(b: *std.Build) void {
     // rather than a static library.
     const exe = b.addExecutable(.{
         .name = "yggdrazig",
+        .root_source_file = b.path("src/main.zig"),
         .root_module = exe_mod,
+        .optimize = .Debug,
     });
+
+    exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
