@@ -26,19 +26,18 @@ pub fn main() !void {
     const root_nodes = try buildTree(allocator, &cwd);
 
     var cursor_index: usize = 0;
+    var prev_cursor_index: usize = 0;
 
     enableRawMode();
     defer disableRawMode();
 
+    var visible = try flattenTree(allocator, root_nodes, 0);
+
+    try std.io.getStdOut().writeAll("\x1b[2J\x1b[H");
+    try renderVisibleTree(visible, cursor_index);
+
     while (true) {
-        std.io.getStdOut().writeAll("\x1b[2J\x1b[H") catch {};
-
-        const visible = try flattenTree(allocator, root_nodes, 0);
-
-        try renderVisibleTree(visible, cursor_index);
-
         const key = try readKey();
-        std.debug.print("Key pressed: {}\n", .{key});
 
         switch (key) {
             'q' => break,
@@ -52,9 +51,23 @@ pub fn main() !void {
                 const current = visible[cursor_index];
                 if (current.node.is_dir) {
                     current.node.expanded = !current.node.expanded;
+                    visible = try flattenTree(allocator, root_nodes, 0);
+                    try std.io.getStdOut().writeAll("\x1b[2J\x1b[H");
+                    try renderVisibleTree(visible, cursor_index);
+                    continue;
                 }
             },
             else => {},
+        }
+
+        if (cursor_index != prev_cursor_index) {
+            try moveToLine(prev_cursor_index);
+            try renderLine(visible[prev_cursor_index], false);
+
+            try moveToLine(cursor_index);
+            try renderLine(visible[cursor_index], true);
+
+            prev_cursor_index = cursor_index;
         }
     }
 }
@@ -91,6 +104,8 @@ fn buildTree(allocator: std.mem.Allocator, dir: *std.fs.Dir) ![]Node {
 fn renderVisibleTree(visible: []VisibleNode, cursor_index: usize) !void {
     const stdout = std.io.getStdOut().writer();
 
+    try stdout.writeAll("\x1b[?25l"); // Hide cursor
+
     for (visible, 0..) |entry, i| {
         for (0..entry.depth) |_| {
             try stdout.writeAll("  | ");
@@ -105,6 +120,8 @@ fn renderVisibleTree(visible: []VisibleNode, cursor_index: usize) !void {
 
         try stdout.print("{s} {s} {s}\n", .{ cursor, marker, entry.node.name });
     }
+
+    try stdout.writeAll("\x1b[?25h"); // Show cursor again (optional here)
 }
 
 fn flattenTree(allocator: std.mem.Allocator, nodes: []Node, depth: usize) ![]VisibleNode {
@@ -133,8 +150,6 @@ fn enableRawMode() void {
     raw.c_lflag &= ~@as(terminos.tcflag_t, terminos.ICANON | terminos.ECHO);
     raw.c_cc[terminos.VMIN] = 1;
     raw.c_cc[terminos.VTIME] = 0;
-
-    _ = terminos.tcsetattr(0, terminos.TCSAFLUSH, &raw);
     _ = terminos.tcsetattr(0, terminos.TCSAFLUSH, &raw);
 }
 
@@ -143,6 +158,7 @@ fn disableRawMode() void {
     _ = terminos.tcgetattr(0, &cooked);
     cooked.c_lflag |= (terminos.ICANON | terminos.ECHO);
     _ = terminos.tcsetattr(0, terminos.TCSAFLUSH, &cooked);
+    std.io.getStdOut().writeAll("\x1b[?25h") catch {};
 }
 
 fn readKey() !u8 {
@@ -163,4 +179,27 @@ fn readKey() !u8 {
     }
 
     return b1;
+}
+
+fn moveToLine(line: usize) !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("\x1b[{};1H", .{line + 1}); // ANSI: line starts at 1
+}
+
+fn renderLine(entry: VisibleNode, is_selected: bool) !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.writeAll("\x1b[2K"); // Clear line
+
+    for (0..entry.depth) |_| {
+        try stdout.writeAll("  | ");
+    }
+
+    const marker = if (entry.node.is_dir)
+        (if (entry.node.expanded) "📂" else "📁")
+    else
+        "📄";
+
+    const cursor = if (is_selected) "▶" else " ";
+
+    try stdout.print("{s} {s} {s}\n", .{ cursor, marker, entry.node.name });
 }
