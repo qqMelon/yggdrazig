@@ -28,19 +28,41 @@ pub fn main() !void {
     var cursor_index: usize = 0;
     var prev_cursor_index: usize = 0;
 
+    var search_mode: bool = false;
+    var search_query = std.ArrayList(u8).init(allocator);
+    defer search_query.deinit();
+
     enableRawMode();
     defer disableRawMode();
 
-    var visible = try flattenTree(allocator, root_nodes, 0);
+    const filter = if (search_query.items.len > 0) search_query.items else null;
+    var visible = try flattenTree(allocator, root_nodes, 0, filter);
 
     try std.io.getStdOut().writeAll("\x1b[2J\x1b[H");
-    try renderVisibleTree(visible, cursor_index);
+    try renderVisibleTree(visible, cursor_index, search_mode, search_query);
 
     while (true) {
         const key = try readKey();
 
         switch (key) {
             'q' => break,
+            '/' => {
+                search_mode = true;
+                search_query.clearRetainingCapacity();
+            },
+            '\x1b' => {
+                if (search_mode) {
+                    search_mode = false;
+                    search_query.clearRetainingCapacity();
+                } else {
+                    break;
+                }
+            },
+            '\r' => {
+                if (search_mode) {
+                    search_mode = false;
+                }
+            },
             'u' => {
                 if (cursor_index > 0) cursor_index -= 1;
             },
@@ -51,13 +73,23 @@ pub fn main() !void {
                 const current = visible[cursor_index];
                 if (current.node.is_dir) {
                     current.node.expanded = !current.node.expanded;
-                    visible = try flattenTree(allocator, root_nodes, 0);
+                    visible = try flattenTree(allocator, root_nodes, 0, filter);
                     try std.io.getStdOut().writeAll("\x1b[2J\x1b[H");
-                    try renderVisibleTree(visible, cursor_index);
+                    try renderVisibleTree(visible, cursor_index, search_mode, search_query);
                     continue;
                 }
             },
-            else => {},
+            else => {
+                if (search_mode) {
+                    if (key == 127 or key == 8) {
+                        if (search_query.items.len > 0) {
+                            _ = search_query.pop();
+                        }
+                    } else {
+                        try search_query.append(key);
+                    }
+                }
+            },
         }
 
         if (cursor_index != prev_cursor_index) {
@@ -101,7 +133,7 @@ fn buildTree(allocator: std.mem.Allocator, dir: *std.fs.Dir) ![]Node {
     return entries.toOwnedSlice();
 }
 
-fn renderVisibleTree(visible: []VisibleNode, cursor_index: usize) !void {
+fn renderVisibleTree(visible: []VisibleNode, cursor_index: usize, search_mode: bool, search_query: std.ArrayList(u8)) !void {
     const stdout = std.io.getStdOut().writer();
 
     try stdout.writeAll("\x1b[?25l"); // Hide cursor
@@ -121,10 +153,13 @@ fn renderVisibleTree(visible: []VisibleNode, cursor_index: usize) !void {
         try stdout.print("{s} {s} {s}\n", .{ cursor, marker, entry.node.name });
     }
 
-    try stdout.writeAll("\x1b[?25h"); // Show cursor again (optional here)
+    // try stdout.writeAll("\x1b[?25h"); // Show cursor again (optional here)
+    if (search_mode) {
+        try stdout.print("\n/search: {s}", .{search_query.items});
+    }
 }
 
-fn flattenTree(allocator: std.mem.Allocator, nodes: []Node, depth: usize) ![]VisibleNode {
+fn flattenTree(allocator: std.mem.Allocator, nodes: []Node, depth: usize, filter: ?[]const u8) ![]VisibleNode {
     var list = std.ArrayList(VisibleNode).init(allocator);
 
     for (nodes) |*node| {
@@ -133,9 +168,13 @@ fn flattenTree(allocator: std.mem.Allocator, nodes: []Node, depth: usize) ![]Vis
             .depth = depth,
         });
 
+        if (filter != null and std.mem.indexOf(u8, node.name, filter.?) == null) {
+            continue;
+        }
+
         if (node.is_dir and node.expanded) {
             if (node.children) |children| {
-                const sublist = try flattenTree(allocator, children, depth + 1);
+                const sublist = try flattenTree(allocator, children, depth + 1, filter);
                 try list.appendSlice(sublist);
             }
         }
@@ -158,7 +197,7 @@ fn disableRawMode() void {
     _ = terminos.tcgetattr(0, &cooked);
     cooked.c_lflag |= (terminos.ICANON | terminos.ECHO);
     _ = terminos.tcsetattr(0, terminos.TCSAFLUSH, &cooked);
-    std.io.getStdOut().writeAll("\x1b[?25h") catch {};
+    // std.io.getStdOut().writeAll("\x1b[?25h") catch {};
 }
 
 fn readKey() !u8 {
