@@ -197,7 +197,7 @@ fn disableRawMode() void {
     _ = terminos.tcgetattr(0, &cooked);
     cooked.c_lflag |= (terminos.ICANON | terminos.ECHO);
     _ = terminos.tcsetattr(0, terminos.TCSAFLUSH, &cooked);
-    // std.io.getStdOut().writeAll("\x1b[?25h") catch {};
+    std.io.getStdOut().writeAll("\x1b[?25h") catch {};
 }
 
 fn readKey() !u8 {
