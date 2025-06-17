@@ -229,6 +229,10 @@ fn renderLine(entry: VisibleNode, is_selected: bool) !void {
     const stdout = std.io.getStdOut().writer();
     try stdout.writeAll("\x1b[2K"); // Clear line
 
+    if (is_selected) {
+        try stdout.writeAll("\x1b[7m");
+    }
+
     for (0..entry.depth) |_| {
         try stdout.writeAll("  | ");
     }
@@ -241,4 +245,10 @@ fn renderLine(entry: VisibleNode, is_selected: bool) !void {
     const cursor = if (is_selected) "▶" else " ";
 
     try stdout.print("{s} {s} {s}\n", .{ cursor, marker, entry.node.name });
+
+    if (is_selected) {
+        try stdout.writeAll("\x1b[0m");
+    }
+
+    try stdout.writeAll("\n");
 }
